@@ -1101,112 +1101,176 @@
             });
             
             // Withdraw form handler
-            document.getElementById('withdraw-form').addEventListener('submit', function(e) {
-                e.preventDefault();
-                
-                const amount = parseFloat(document.getElementById('withdraw-amount').value);
-                const expiryDays = parseInt(document.getElementById('withdraw-expiry').value);
-                const withdrawError = document.getElementById('withdraw-error');
-                
-                withdrawError.style.display = 'none';
-                
-                if (isNaN(amount) || amount <= 0) {
-                    withdrawError.textContent = 'Please enter a valid amount';
-                    withdrawError.style.display = 'block';
-                    return;
-                }
-                
-                // Generate a unique note ID and serial number
-                const noteId = 'note_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-                const serialNumber = 'SB' + Date.now().toString().substr(-10) + Math.random().toString(36).substr(2, 6).toUpperCase();
-                
-                // Create a new bank note via API
-                fetch(`${apiBaseUrl}/bank-notes/create.php`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + getSessionToken()
-                    },
-                    body: JSON.stringify({
-                        note_id: noteId,
-                        serial_number: serialNumber,
-                        amount: amount,
-                        expiry_days: expiryDays
-                    })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        // Display the new bank note
-                        displayBankNote(data);
-                        
-                        // Refresh account info to show updated balance
-                        loadAccountInfo();
-                        
-                        // Refresh bank notes list
-                        loadBankNotes();
-                    } else {
-                        withdrawError.textContent = data.message;
-                        withdrawError.style.display = 'block';
-                    }
-                })
-                .catch(error => {
-                    withdrawError.textContent = 'Error creating bank note: ' + error.message;
-                    withdrawError.style.display = 'block';
-                });
-            });
+document.getElementById('withdraw-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    // Prevent double submission
+    const submitButton = this.querySelector('button[type="submit"]');
+    if (submitButton.disabled) return; // Already submitted
+    submitButton.disabled = true;
+    submitButton.innerHTML = 'Processing...';
+    
+    const amount = parseFloat(document.getElementById('withdraw-amount').value);
+    const expiryDays = parseInt(document.getElementById('withdraw-expiry').value);
+    const withdrawError = document.getElementById('withdraw-error');
+    
+    withdrawError.style.display = 'none';
+    
+    if (isNaN(amount) || amount <= 0) {
+        withdrawError.textContent = 'Please enter a valid amount';
+        withdrawError.style.display = 'block';
+        // Re-enable the submit button for retry
+        submitButton.disabled = false;
+        submitButton.innerHTML = 'Generate Bank Note';
+        return;
+    }
+    
+    // Generate a unique note ID and serial number
+    const noteId = 'note_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    const serialNumber = 'SB' + Date.now().toString().substr(-10) + Math.random().toString(36).substr(2, 6).toUpperCase();
+    
+    // Add idempotency key to prevent duplicate processing
+    const idempotencyKey = 'withdraw_' + noteId;
+    
+    // Create a new bank note via API
+    fetch(`${apiBaseUrl}/bank-notes/create.php`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + getSessionToken()
+        },
+        body: JSON.stringify({
+            note_id: noteId,
+            serial_number: serialNumber,
+            amount: amount,
+            expiry_days: expiryDays,
+            idempotency_key: idempotencyKey
+        })
+    })
+    .then(response => {
+        // Check for userStyle tag in response and remove it
+        return response.text().then(text => {
+            const cleanText = text.replace(/<userStyle>.*?<\/userStyle>/g, '');
+            try {
+                return JSON.parse(cleanText);
+            } catch (e) {
+                console.error("Failed to parse:", cleanText);
+                throw new Error("Invalid JSON response");
+            }
+        });
+    })
+    .then(data => {
+        if (data.success) {
+            // Display the new bank note
+            displayBankNote(data);
             
-            // Deposit form handler
-            document.getElementById('deposit-form').addEventListener('submit', function(e) {
-                e.preventDefault();
-                
-                const noteIdentifier = document.getElementById('note-id').value.trim();
-                const depositError = document.getElementById('deposit-error');
-                const depositSuccess = document.getElementById('deposit-success');
-                
-                depositError.style.display = 'none';
-                depositSuccess.style.display = 'none';
-                
-                if (!noteIdentifier) {
-                    depositError.textContent = 'Please enter a bank note ID or serial number';
-                    depositError.style.display = 'block';
-                    return;
-                }
-                
-                // Deposit the bank note via API
-                fetch(`${apiBaseUrl}/bank-notes/deposit.php`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + getSessionToken()
-                    },
-                    body: JSON.stringify({
-                        note_identifier: noteIdentifier
-                    })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        depositSuccess.textContent = `Successfully deposited bank note worth $${data.bank_note.amount.toFixed(2)}`;
-                        depositSuccess.style.display = 'block';
-                        document.getElementById('note-id').value = '';
-                        
-                        // Refresh account info to show updated balance
-                        loadAccountInfo();
-                        
-                        // Refresh bank notes lists
-                        loadBankNotes();
-                    } else {
-                        depositError.textContent = data.message;
-                        depositError.style.display = 'block';
-                    }
-                })
-                .catch(error => {
-                    depositError.textContent = 'Error depositing bank note: ' + error.message;
-                    depositError.style.display = 'block';
-                });
-            });
+            // Refresh account info to show updated balance
+            loadAccountInfo();
             
+            // Refresh bank notes list
+            loadBankNotes();
+            
+            // Reset form after successful operation
+            document.getElementById('withdraw-amount').value = '';
+        } else {
+            withdrawError.textContent = data.message;
+            withdrawError.style.display = 'block';
+        }
+    })
+    .catch(error => {
+        withdrawError.textContent = 'Error creating bank note: ' + error.message;
+        withdrawError.style.display = 'block';
+    })
+    .finally(() => {
+        // Re-enable the submit button after a delay
+        setTimeout(() => {
+            submitButton.disabled = false;
+            submitButton.innerHTML = 'Generate Bank Note';
+        }, 2000);
+    });
+});
+
+// Deposit form handler
+document.getElementById('deposit-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    // Prevent double submission
+    const submitButton = this.querySelector('button[type="submit"]');
+    if (submitButton.disabled) return; // Already submitted
+    submitButton.disabled = true;
+    submitButton.innerHTML = 'Processing...';
+    
+    const noteIdentifier = document.getElementById('note-id').value.trim();
+    const depositError = document.getElementById('deposit-error');
+    const depositSuccess = document.getElementById('deposit-success');
+    
+    depositError.style.display = 'none';
+    depositSuccess.style.display = 'none';
+    
+    if (!noteIdentifier) {
+        depositError.textContent = 'Please enter a bank note ID or serial number';
+        depositError.style.display = 'block';
+        // Re-enable the submit button for retry
+        submitButton.disabled = false;
+        submitButton.innerHTML = 'Verify & Deposit';
+        return;
+    }
+    
+    // Add idempotency key to prevent duplicate processing
+    const idempotencyKey = 'deposit_' + noteIdentifier + '_' + Date.now();
+    
+    // Deposit the bank note via API
+    fetch(`${apiBaseUrl}/bank-notes/deposit.php`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + getSessionToken()
+        },
+        body: JSON.stringify({
+            note_identifier: noteIdentifier,
+            idempotency_key: idempotencyKey
+        })
+    })
+    .then(response => {
+        // Check for userStyle tag in response and remove it
+        return response.text().then(text => {
+            const cleanText = text.replace(/<userStyle>.*?<\/userStyle>/g, '');
+            try {
+                return JSON.parse(cleanText);
+            } catch (e) {
+                console.error("Failed to parse:", cleanText);
+                throw new Error("Invalid JSON response");
+            }
+        });
+    })
+    .then(data => {
+        if (data.success) {
+            depositSuccess.textContent = `Successfully deposited bank note worth $${data.bank_note.amount.toFixed(2)}`;
+            depositSuccess.style.display = 'block';
+            document.getElementById('note-id').value = '';
+            
+            // Refresh account info to show updated balance
+            loadAccountInfo();
+            
+            // Refresh bank notes lists
+            loadBankNotes();
+        } else {
+            depositError.textContent = data.message;
+            depositError.style.display = 'block';
+        }
+    })
+    .catch(error => {
+        depositError.textContent = 'Error depositing bank note: ' + error.message;
+        depositError.style.display = 'block';
+    })
+    .finally(() => {
+        // Re-enable the submit button after a delay
+        setTimeout(() => {
+            submitButton.disabled = false;
+            submitButton.innerHTML = 'Verify & Deposit';
+        }, 2000);
+    });
+});
             // Upload note button handler
             document.getElementById('upload-note-btn').addEventListener('click', function() {
                 showImportNoteModal('upload');

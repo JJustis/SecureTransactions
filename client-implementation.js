@@ -37,7 +37,9 @@ const makeRequest = function(endpoint, data, successCallback, errorCallback, ret
     
     // Setup timeout
     xhr.timeout = config.requestTimeout;
-    
+        if (!data.idempotency_key) {
+        data.idempotency_key = generateIdempotencyKey(endpoint, data);
+    }
     // Setup handlers
     xhr.onload = function() {
         if (xhr.status >= 200 && xhr.status < 300) {
@@ -581,7 +583,20 @@ const makeRequest = function(endpoint, data, successCallback, errorCallback, ret
         }
     };
 })();
-
+// Generate a unique idempotency key for requests
+function generateIdempotencyKey(endpoint, data) {
+    // Create a copy of the data without any existing idempotency key
+    const baseData = {...data};
+    if (baseData.idempotency_key) {
+        delete baseData.idempotency_key;
+    }
+    
+    // Create a string representation of the data for the key
+    const dataString = JSON.stringify(baseData);
+    
+    // Create a unique identifier combining endpoint, data, and timestamp
+    return 'key_' + btoa(endpoint + '_' + dataString + '_' + Date.now());
+}
 // HTML Interface 
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize SecureBank client
@@ -635,7 +650,7 @@ document.addEventListener('DOMContentLoaded', function() {
         SecureBank.logout();
         showLoginForm();
     });
-    
+
     // Functions to show/hide forms
     function showLoginForm() {
         document.getElementById('login-container').style.display = 'block';
@@ -704,68 +719,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     // Bank note creation form
-    document.getElementById('withdraw-form')?.addEventListener('submit', function(e) {
-        e.preventDefault();
-        
-        const amount = parseFloat(document.getElementById('withdraw-amount').value);
-        const expiryDays = parseInt(document.getElementById('withdraw-expiry').value);
-        
-        if (isNaN(amount) || amount <= 0) {
-            document.getElementById('withdraw-error').textContent = 'Please enter a valid amount';
-            return;
-        }
-        
-        SecureBank.createBankNote(amount, expiryDays, function(response) {
-            document.getElementById('withdraw-error').textContent = '';
-            
-            // Display bank note
-            document.getElementById('banknote-serial').textContent = response.serial;
-            document.getElementById('banknote-amount').textContent = '$' + response.amount.toFixed(2);
-            document.getElementById('banknote-issuer').textContent = response.issuer;
-            document.getElementById('banknote-issued').textContent = new Date(response.issued_at).toLocaleString();
-            document.getElementById('banknote-expires').textContent = new Date(response.expires_at).toLocaleString();
-            
-            document.getElementById('bank-note-container').style.display = 'block';
-            
-            // Refresh account info
-            SecureBank.getAccountInfo(function(accountInfo) {
-                document.getElementById('account-balance').textContent = 
-                    accountInfo.balance ? '$' + accountInfo.balance.toFixed(2) : '$0.00';
-            }, function(error) {
-                console.error('Error refreshing account info:', error);
-            });
-        }, function(error) {
-            document.getElementById('withdraw-error').textContent = error;
-        });
-    });
     
     // Bank note deposit form
-    document.getElementById('deposit-form')?.addEventListener('submit', function(e) {
-        e.preventDefault();
-        
-        const noteIdentifier = document.getElementById('note-id').value;
-        
-        if (!noteIdentifier) {
-            document.getElementById('deposit-error').textContent = 'Please enter a bank note ID';
-            return;
-        }
-        
-        SecureBank.depositBankNote(noteIdentifier, function(response) {
-            document.getElementById('deposit-error').textContent = '';
-            document.getElementById('deposit-success').textContent = 'Bank note deposited successfully!';
-            document.getElementById('deposit-success').style.display = 'block';
-            
-            // Refresh account info
-            SecureBank.getAccountInfo(function(accountInfo) {
-                document.getElementById('account-balance').textContent = 
-                    accountInfo.balance ? '$' + accountInfo.balance.toFixed(2) : '$0.00';
-            }, function(error) {
-                console.error('Error refreshing account info:', error);
-            });
-        }, function(error) {
-            document.getElementById('deposit-error').textContent = error;
-            document.getElementById('deposit-error').style.display = 'block';
-            document.getElementById('deposit-success').style.display = 'none';
-        });
-    });
+  
 });

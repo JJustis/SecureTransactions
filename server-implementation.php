@@ -1959,21 +1959,53 @@ try {
         }
     }
     
-    // Handle depositing a bank note
-    private function handleDepositBankNote() {
-        $data = $this->getRequestData();
-        $userId = $this->authenticateRequest();
+private function handleDepositBankNote() {
+    $data = $this->getRequestData();
+    $userId = $this->authenticateRequest();
+    
+    if (!$userId) {
+        $this->sendResponse(false, 'Authentication required');
+        return;
+    }
+    
+    // Validate request data
+    if (!isset($data['note_identifier'])) {
+        $this->sendResponse(false, 'Missing note identifier');
+        return;
+    }
+    
+    // Check for idempotency key
+    $idempotencyKey = $data['idempotency_key'] ?? null;
+    if ($idempotencyKey) {
+        // Check if we've already processed this request
+        $db = (new Database())->getConnection();
+        $stmt = $db->prepare(
+            "SELECT 1 FROM processed_requests 
+             WHERE idempotency_key = :key AND user_id = :user_id
+             LIMIT 1"
+        );
+        $stmt->execute([
+            ':key' => $idempotencyKey,
+            ':user_id' => $userId
+        ]);
         
-        if (!$userId) {
-            $this->sendResponse(false, 'Authentication required');
+        if ($stmt->rowCount() > 0) {
+            // Request already processed, return success
+            $this->sendResponse(true, 'Bank note already deposited');
             return;
         }
         
-        // Validate request data
-        if (!isset($data['note_identifier'])) {
-            $this->sendResponse(false, 'Missing note identifier');
-            return;
-        }
+        // Store the request as being processed
+        $stmt = $db->prepare(
+            "INSERT INTO processed_requests (idempotency_key, user_id, created_at)
+             VALUES (:key, :user_id, :created_at)"
+        );
+        $stmt->execute([
+            ':key' => $idempotencyKey,
+            ':user_id' => $userId,
+            ':created_at' => time()
+        ]);
+    }
         
         try {
             $bankNote = new BankNote();
